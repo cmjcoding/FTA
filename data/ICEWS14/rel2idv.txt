@@ -1,0 +1,230 @@
+Statement was made	0
+Consultation was made	1
+Appeal or request was made	2
+Intent to meet or negotiate was expressed	3
+Visit was made	4
+Visit was hosted	5
+Arrest, detention, or legal action was made	6
+Praise or endorsement was made	7
+Criticism or denunciation was made	8
+Accusation was made	9
+Unconventional violence was used	10
+Conventional military force was used	11
+Negotiation was engaged in	12
+Intent to cooperate was expressed	13
+Demand was made	14
+Intent to engage in diplomatic cooperation (such as policy support) was expressed	15
+Diplomatic cooperation was engaged in	16
+Formal agreement was signed	17
+Investigation was made	18
+Discussion by telephone took place	19
+Rejection was made	20
+Fighting with small arms and light weapons took place	21
+Optimistic comment was made	22
+Threat was made	23
+Demonstration or rally was made	24
+Abduction, hijacking, or hostage situation took place	25
+Pessimistic comment was made	26
+Meeting at a 'third' location took place	27
+Symbolic act was engaged in	28
+Appeal for diplomatic cooperation (such as policy support) was made	29
+Person(s) were returned or released	30
+Violent protest or riot took place	31
+Humanitarian aid was provided	32
+Empathetic comment was made	33
+Tactics of violent repression were used	34
+Territory was occupied	35
+Physical assault took place	36
+Relations were reduced	37
+Responsibility was denied	38
+Armed forces were mobilized or increased	39
+Aid was provided	40
+Administrative sanctions were eased	41
+Lawsuit was brought against	42
+Administrative sanctions were imposed	43
+Property was confiscated	44
+Individuals were expelled or deported	45
+Diplomatic relations were reduced or broken	46
+Economic cooperation took place	47
+Sexual assault took place	48
+Official complaint was made	49
+Rally support on behalf of was made	50
+Military cooperation took place	51
+Embargo, boycott, or sanctions were imposed	52
+Coercion took place	53
+Yield took place	54
+Intent to provide military aid was expressed	55
+Policy option was considered	56
+Intent to cooperate economically was expressed	57
+Threat with military force was made	58
+Military aid was provided	59
+Material cooperation was engaged in	60
+Proposal to meet, discuss, or negotiate was rejected	61
+Aerial weapons were employed	62
+Intent to provide material aid was expressed	63
+Economic aid was provided	64
+Killing by physical assault took place	65
+Suicide, car, or other non-military bombing was conducted	66
+Accord was expressed	67
+Suicide bombing was carried out	68
+Appeal for intelligence was made	69
+Rally opposition against was made	70
+Intent to release persons or property was expressed	71
+Demand for change in leadership was made	72
+Intent to provide economic aid was expressed	73
+Accusation of crime or corruption was made	74
+Demand for diplomatic cooperation (such as policy support) was made	75
+Diplomatic recognition was granted	76
+Responsibility was acknowledged or claimed	77
+Defiance of norms or law took place	78
+Restrictions on political freedoms were imposed	79
+Plan or agreement to settle dispute was rejected	80
+Intent to settle dispute was expressed	81
+Military retreat or surrender took place	82
+Passage was obstructed or blocked	83
+Appeal for change in leadership was made	84
+Intent to provide humanitarian aid was expressed	85
+Assassination took place	86
+Ultimatum was given	87
+Accusation of human rights abuses was made	88
+Refusal to yield took place	89
+Intelligence or information was shared	90
+Crime or corruption was investigated	91
+Appeal to engage in or accept mediation was made	92
+Appeal for de-escalation of military engagement was made	93
+Military or police power was demonstrated	94
+Negotiations were halted	95
+Demands for change in leadership were acceded to	96
+Fighting with artillery and tanks took place	97
+Apology was made	98
+Appeal for release of persons or property was made	99
+Strike or boycott was conducted	100
+Military alert status was increased	101
+Police power was mobilized or increased	102
+Appeal for judicial cooperation was made	103
+Torture took place	104
+Appeal to others to meet or negotiate was made	105
+Deployment of peacekeepers was received	106
+Intent to de-escalate military engagement was expressed	107
+Truce or ceasefire was declared	108
+Verbal defense was made	109
+Demonstration for leadership change took place	110
+Refusal to release persons or property took place	111
+Appeal for military aid was made	112
+Decline to comment was made	113
+Military protection or peacekeeping was provided	114
+Police alert status was increased	115
+Appeal for aid was made	116
+Economic sanctions, boycott, or embargo were eased	117
+Appeal for change in institutions or regime was made	118
+Appeal for economic aid was made	119
+Intent to ease economic sanctions, boycott, or embargo was expressed	120
+Blockade was imposed or movement was restricted	121
+Mediation took place	122
+Demand for meeting or negotiation was made	123
+Accusation of espionage or treason was made	124
+Appeal for easing of administrative sanctions was made	125
+Appeal for economic cooperation was made	126
+Intent to cooperate militarily was expressed	127
+Appeal to others to settle dispute was made	128
+Demand for intelligence cooperation was made	129
+Intent to mediate was expressed	130
+Attempt to assassinate took place	131
+Appeal for policy change was made	132
+Demand for material cooperation was made	133
+Mass killings took place	134  
+Demand for de-escalation of military engagement was made	135
+Intent to ease administrative sanctions was expressed	136
+Intent to yield was expressed	137
+State of emergency or martial law was imposed	138
+Property was returned or released	139
+Appeal for material cooperation was made	140
+Judicial cooperation was engaged in	141
+Asylum was granted	142
+Accusation of aggression was made	143
+Appeal for rights was made	144
+Demand for economic aid was made	145
+Intent to accept mediation was expressed	146
+Intent to engage in material cooperation was expressed	147
+Property was seized or damaged	148
+Non-force threat was made	149
+Demands for rights were acceded to	150
+Economic assistance was reduced or stopped	151
+Military assistance was reduced or stopped	152
+Refusal to ease administrative sanctions took place	153  
+Veto took place	154
+Accusation of war crimes was made	155
+Appeal to yield was made	156
+Appeal for humanitarian aid was made	157
+Demand for change in institutions or regime was made	158
+Demand for release of persons or property was made	159
+Demand that target yields was made	160
+Curfew was eased	161
+Intent to cooperate on intelligence was expressed	162
+Political parties or politicians were banned	163
+Demand for settling of dispute was made	164
+Refusal to de-escalate military engagement took place	165
+Threat with political dissent or protest was made	166
+Intent to change leadership was expressed	167
+Intent to provide military protection or peacekeeping was expressed	168
+Material aid was reduced or stopped	169
+Threat to reduce or break relations was made	170
+Threat with repression was made	171
+Threat with sanctions, boycott, or embargo was made	172
+Ceasefire was violated	173
+Demand for mediation was made	174
+Property was destroyed	175
+Demands for change in institutions or regime were acceded to	176
+Demand for easing of administrative sanctions was made	177
+Demand for judicial cooperation was made	178
+Armed forces were demobilized	179
+Demonstration for policy change took place	180
+Peacekeepers were expelled or withdrawn	181
+Human rights abuses were investigated	182
+Humanitarian assistance was reduced or stopped	183
+Refusal to ease economic sanctions, boycott, or embargo took place	184
+Threat to reduce or stop aid was made	185
+Appeal for political reform was made	186
+Hunger strike was conducted	187
+Demand for military aid was made	188
+Demand for political reform was made	189
+Military blockade was eased	190
+Forgiveness took place	191
+Material cooperation was rejected	192
+Military cooperation was rejected	193
+Demands for change in policy were acceded to	194
+Requests or demands for political reform were acceded to	195
+Demand for policy change was made	196  
+Demand for rights was made	197
+Political dissent took place	198
+Intent to change policy was expressed	199
+Intent to cooperate on judicial matters was expressed	200
+Mediation was halted	201
+Passage was obstructed to demand leadership change	202
+Inspectors were received	203
+Economic cooperation was rejected	204
+Human shield was used	205
+Appeal for easing of economic sanctions, boycott, or embargo was made	206
+Appeal for military protection or peacekeeping was made	207
+Appeal for target to allow international involvement (non-mediation) was made	208
+Car bombing was carried out	209
+Roadside bombing was carried out	210
+Demand for humanitarian aid was made	211
+Demand for material aid was made	212
+Nuclear weapons were detonated	213
+Political dissent was eased	214  
+State of emergency or martial law was eased	215
+Mass expulsion took place	216
+Violent protest for rights took place	217
+Expulsion or withdrawal took place	218  
+Intent to change institutions or regime was expressed	219
+Intent to institute political reform was expressed	220
+War crimes were investigated	221
+Judicial cooperation was rejected	222
+Request for change in leadership was rejected	223
+Request for military aid was rejected	224
+Request for military protection or peacekeeping was rejected	225
+Threat to halt mediation was made	226
+Threat to halt negotiations was made	227
+Threat with administrative sanctions was made	228
+Chemical, biological, or radiological weapons were used	229
