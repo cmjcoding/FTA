@@ -366,6 +366,8 @@ class PreBertDataset(Dataset):
 class PreBert(nn.Module):
     def __init__(self):
         super(PreBert, self).__init__()
+        self.debug_mode = False  # 可以通过配置文件或参数控制
+        self.logger = self._setup_logger()
         self.backbone_model = BertModel.from_pretrained(bert_path)
         self.mlm_model = BertForMaskedLM.from_pretrained(bert_path)
         self.tokenizer = BertTokenizerFast.from_pretrained('./bert/bert_base_cased_{}'.format(dataset))
@@ -377,6 +379,20 @@ class PreBert(nn.Module):
             self.model = BertForMaskedLM.from_pretrained(bert_path_test)
         # +++ 新增模糊类型模块 +++
         self.fuzzy_layer = FuzzyTypeAware(self.model.bert, self.model.config.hidden_size)
+        self.config = self.model.config  # 添加此行以访问配置
+
+    def _setup_logger(self):
+        # 设置日志记录器
+        logger = logging.getLogger(__name__)
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            )
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+            logger.setLevel(logging.DEBUG if self.debug_mode else logging.INFO)
+        return logger
 
     def init_tokenizer(self, entity_id):
         if not os.path.exists('./bert/bert_base_cased_{}'.format(dataset) + '/added_tokens.json'):
@@ -415,29 +431,54 @@ class PreBert(nn.Module):
 
 # +++ 替换forward函数 +++
     def forward(self, input_ids, attention_mask, labels):
-        with autocast():
+        if self.debug_mode:
+            self.logger.debug(f"Forward pass input shapes:")
+            self.logger.debug(f"- input_ids: {input_ids.shape}")
+            self.logger.debug(f"- attention_mask: {attention_mask.shape}")
+            self.logger.debug(f"- labels: {labels.shape}")
+
+        try:
+            # 输入验证
+            self._validate_inputs(input_ids, attention_mask, labels)
+
+            # 模型前向传播
             outputs = self.model(input_ids, attention_mask=attention_mask, labels=labels)
-            prediction_scores = outputs.logits
 
-            # 调试信息
-            print(f"prediction_scores shape: {prediction_scores.shape}")
-            print(f"labels shape: {labels.shape}")
-            print(f"config.vocab_size: {self.config.vocab_size}")
+            if self.debug_mode:
+                self.logger.debug(f"Model outputs:")
+                self.logger.debug(f"- logits shape: {outputs.logits.shape}")
+                self.logger.debug(f"- loss: {outputs.loss.item():.4f}")
 
-            # 确保 vocab_size 一致
-            assert prediction_scores.size(-1) == self.config.vocab_size, "Vocab size mismatch"
+                # 添加详细的张量统计信息
+                self._log_tensor_stats("预测分数", outputs.logits)
+                self._log_tensor_stats("标签", labels)
 
-            # 忽略 labels 中的填充值
-            labels[labels == tokenizer.pad_token_id] = -100
+            return outputs.loss
+        except Exception as e:
+            self.logger.error(f"Forward pass error: {str(e)}")
+            raise
 
-            # 调整形状
-            prediction_scores = prediction_scores.view(-1, self.config.vocab_size)
-            labels = labels.view(-1)
+    def _validate_inputs(self, input_ids, attention_mask, labels):
+        """验证输入数据的形状和值"""
+        if self.debug_mode:
+            assert input_ids.dim() == 2, f"输入维度应为2维,实际为: {input_ids.shape}"
+            assert attention_mask.shape == input_ids.shape, \
+                f"注意力掩码形状 {attention_mask.shape} 与输入形状不匹配 {input_ids.shape}"
 
-            # 计算损失
-            loss_fct = torch.nn.CrossEntropyLoss()
-            masked_lm_loss = loss_fct(prediction_scores, labels)
-        return masked_lm_loss
+            # 检查数值范围
+            self.logger.debug(f"Input value ranges:")
+            self.logger.debug(f"- input_ids: [{input_ids.min()}, {input_ids.max()}]")
+            self.logger.debug(f"- attention_mask: [{attention_mask.min()}, {attention_mask.max()}]")
+
+    def _log_tensor_stats(self, name, tensor):
+        """记录张量的统计信息"""
+        if self.debug_mode:
+            self.logger.debug(f"{name} statistics:")
+            self.logger.debug(f"- shape: {tensor.shape}")
+            self.logger.debug(f"- dtype: {tensor.dtype}")
+            self.logger.debug(f"- device: {tensor.device}")
+            self.logger.debug(f"- mean: {tensor.float().mean().item():.4f}")
+            self.logger.debug(f"- std: {tensor.float().std().item():.4f}")
 
     def result(self, tail_mask, attention_mask, tail_index, text, tail_pos, labels):
         outputs = self.model(tail_mask, attention_mask=attention_mask, labels=labels)
@@ -475,6 +516,34 @@ id_entity, entity_id = D.get_entity_by_id()
 entity_num = len(entity_id)
 md = MakeData(dataset, max_sample, rand_flag)
 
+
+def _log_batch_stats(self, loss, step):
+    """记录批次统计信息"""
+    if not hasattr(self, '_running_stats'):
+        self._running_stats = {
+            'losses': [],
+            'grad_norms': {},
+            'batch_times': []
+        }
+
+    self._running_stats['losses'].append(loss)
+
+    # 记录梯度范数
+    for name, param in self.named_parameters():
+        if param.grad is not None:
+            if name not in self._running_stats['grad_norms']:
+                self._running_stats['grad_norms'][name] = []
+            self._running_stats['grad_norms'][name].append(
+                param.grad.norm().item()
+            )
+
+    # 每N步输出统计信息
+    if step > 0 and step % 100 == 0:
+        recent_losses = self._running_stats['losses'][-100:]
+        self.logger.debug(f"\nRecent training stats:")
+        self.logger.debug(f"- Average loss: {sum(recent_losses) / len(recent_losses):.4f}")
+        self.logger.debug(f"- Loss std: {torch.tensor(recent_losses).std():.4f}")
+
 # train
 def train(pre_epochs):
     rand_flag = True
@@ -494,9 +563,16 @@ def train(pre_epochs):
         pre_model.train()
 
         for epoch in range(pre_epochs):
-            epoch_start_time = time.time()  # 记录每个epoch的开始时间
+            epoch_start_time = time.time()
             total_loss = 0
-            loop = tqdm(enumerate(pre_train_dataloader), total=len(pre_train_dataloader), leave=False)
+
+            if pre_model.debug_mode:
+                pre_model.logger.debug(f"\nEpoch {epoch + 1}/{pre_epochs} started")
+
+            for step, batch in enumerate(pre_train_dataloader):
+                if pre_model.debug_mode and step % 100 == 0:  # 每100步记录一次
+                    pre_model.logger.debug(f"\nBatch {step}/{len(pre_train_dataloader)}:")
+                    pre_model.logger.debug(f"- Memory used: {torch.cuda.memory_allocated() / 1024 ** 2:.2f}MB")
 
             for step, batch in loop:
                 batch_start_time = time.time()  # 记录每个batch的开始时间
@@ -543,7 +619,8 @@ def train(pre_epochs):
             # 打印GPU内存使用情况
             if torch.cuda.is_available():
                 print(f"GPU memory after epoch: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB")
-
+            if pre_model.debug_mode:
+                pre_model._log_batch_stats(loss.item(), step)
 
 # eval and test
 def test():
