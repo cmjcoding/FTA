@@ -126,17 +126,19 @@ def calc_mrr_count(score, labels, hits=[]):
         hitsCount = [torch.sum((ranks <= i).float()).item() for i in hits]
         return mrrCount, hitsCount
 
+
 def filter_score(test_triples, score, all_ans):
     if all_ans is None:
         return score
-    test_triples = test_triples.cpu()
-    for _, triple in enumerate(test_triples):
-        h, r, t, no_use = triple
-        ans = list(all_ans[h.item()][r.item()])
-        ans.remove(t.item())
-        ans = torch.LongTensor(ans)
-        score[_][ans] = -10000000  #
+
+    # 保证所有操作都在 GPU 上进行
+    for i in range(test_triples.size(0)):
+        h, r, t, _ = test_triples[i]
+        ans = all_ans[h.item()][r.item()]
+        ans = torch.tensor([a for a in ans if a != t.item()], device=score.device)  # 保持在 GPU
+        score[i, ans] = -10000000  # 设定小值以过滤
     return score
+
 def calc_mrr_count_filter(score, labels, quads, hits=[], all_ans={}):
     with torch.no_grad():
         score = filter_score(quads, score, all_ans)

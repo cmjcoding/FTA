@@ -17,6 +17,7 @@ from dataset import Dataset as DatasetFromMe
 from utils import *
 from joblib import Parallel, delayed
 from torch.cuda.amp import autocast, GradScaler
+from concurrent.futures import ThreadPoolExecutor
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -416,7 +417,27 @@ class PreBert(nn.Module):
     def forward(self, input_ids, attention_mask, labels):
         with autocast():
             outputs = self.model(input_ids, attention_mask=attention_mask, labels=labels)
-        return outputs.loss
+            prediction_scores = outputs.logits
+
+            # 调试信息
+            print(f"prediction_scores shape: {prediction_scores.shape}")
+            print(f"labels shape: {labels.shape}")
+            print(f"config.vocab_size: {self.config.vocab_size}")
+
+            # 确保 vocab_size 一致
+            assert prediction_scores.size(-1) == self.config.vocab_size, "Vocab size mismatch"
+
+            # 忽略 labels 中的填充值
+            labels[labels == tokenizer.pad_token_id] = -100
+
+            # 调整形状
+            prediction_scores = prediction_scores.view(-1, self.config.vocab_size)
+            labels = labels.view(-1)
+
+            # 计算损失
+            loss_fct = torch.nn.CrossEntropyLoss()
+            masked_lm_loss = loss_fct(prediction_scores, labels)
+        return masked_lm_loss
 
     def result(self, tail_mask, attention_mask, tail_index, text, tail_pos, labels):
         outputs = self.model(tail_mask, attention_mask=attention_mask, labels=labels)
@@ -640,21 +661,29 @@ def vis():
 # 数据预处理验证模块（新增部分）
 def validate_data_pipeline():
     print("\n=== 开始数据预处理验证 ===")
-
-    # 用 md.get_data 代替 get_test_data（避免多次 batch 并发采样）
     test_data = md.get_data('test')
+
+    # 检查 test_data 的结构
+    if isinstance(test_data, list):
+        print(f"test_data 类型为列表，转换为字典格式")
+        test_data = {
+            'data': [item['data'] for item in test_data],
+            'label': [item['label'] for item in test_data],
+            'paths': [item['paths'] for item in test_data]
+        }
+
     print(f"测试样本数量: {len(test_data['data'])}")
 
-    # 初始化模型
     val_model = PreBert()
     val_model.to(device)
     val_model.init_tokenizer(entity_id)
 
-    # 构建测试 DataLoader（只有一个 batch）
     test_dataset = val_model.make_dataloader(test_data)
     for batch in test_dataset:
         sample = batch
-        break  # 只取第一个 batch 样本进行验证
+        break
+
+    print(f"input_ids shape: {sample['input_ids'].shape}")
 
     print("\n样本数据结构验证:")
     print(f"input_ids shape: {sample['input_ids'].shape} | 示例: {sample['input_ids'][0][:10]}")
