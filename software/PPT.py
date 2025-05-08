@@ -18,6 +18,7 @@ from utils import *
 from joblib import Parallel, delayed
 from torch.cuda.amp import autocast, GradScaler
 from concurrent.futures import ThreadPoolExecutor
+import logging
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -366,6 +367,8 @@ class PreBertDataset(Dataset):
 class PreBert(nn.Module):
     def __init__(self):
         super(PreBert, self).__init__()
+        self.debug_mode = args.debug
+        self.logger = self._setup_logger()
         self.debug_mode = False  # 可以通过配置文件或参数控制
         self.logger = self._setup_logger()
         self.backbone_model = BertModel.from_pretrained(bert_path)
@@ -380,6 +383,46 @@ class PreBert(nn.Module):
         # +++ 新增模糊类型模块 +++
         self.fuzzy_layer = FuzzyTypeAware(self.model.bert, self.model.config.hidden_size)
         self.config = self.model.config  # 添加此行以访问配置
+
+    def _setup_logger(self):
+        logger = logging.getLogger(__name__)
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            )
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+            # 使用配置文件中的debug_level
+            logger.setLevel(getattr(logging, args.debug_level))
+        return logger
+
+    def _log_batch_stats(self, loss, step):
+        """记录批次统计信息"""
+        if not hasattr(self, '_running_stats'):
+            self._running_stats = {
+                'losses': [],
+                'grad_norms': {},
+                'batch_times': []
+            }
+
+        self._running_stats['losses'].append(loss)
+
+        # 记录梯度范数
+        for name, param in self.named_parameters():
+            if param.grad is not None:
+                if name not in self._running_stats['grad_norms']:
+                    self._running_stats['grad_norms'][name] = []
+                self._running_stats['grad_norms'][name].append(
+                    param.grad.norm().item()
+                )
+
+        # 每N步输出统计信息
+        if step > 0 and step % 100 == 0:
+            recent_losses = self._running_stats['losses'][-100:]
+            self.logger.debug(f"\nRecent training stats:")
+            self.logger.debug(f"- Average loss: {sum(recent_losses) / len(recent_losses):.4f}")
+            self.logger.debug(f"- Loss std: {torch.tensor(recent_losses).std():.4f}")
 
     def _setup_logger(self):
         # 设置日志记录器
@@ -517,33 +560,6 @@ entity_num = len(entity_id)
 md = MakeData(dataset, max_sample, rand_flag)
 
 
-def _log_batch_stats(self, loss, step):
-    """记录批次统计信息"""
-    if not hasattr(self, '_running_stats'):
-        self._running_stats = {
-            'losses': [],
-            'grad_norms': {},
-            'batch_times': []
-        }
-
-    self._running_stats['losses'].append(loss)
-
-    # 记录梯度范数
-    for name, param in self.named_parameters():
-        if param.grad is not None:
-            if name not in self._running_stats['grad_norms']:
-                self._running_stats['grad_norms'][name] = []
-            self._running_stats['grad_norms'][name].append(
-                param.grad.norm().item()
-            )
-
-    # 每N步输出统计信息
-    if step > 0 and step % 100 == 0:
-        recent_losses = self._running_stats['losses'][-100:]
-        self.logger.debug(f"\nRecent training stats:")
-        self.logger.debug(f"- Average loss: {sum(recent_losses) / len(recent_losses):.4f}")
-        self.logger.debug(f"- Loss std: {torch.tensor(recent_losses).std():.4f}")
-
 # train
 def train(pre_epochs):
     rand_flag = True
@@ -573,42 +589,6 @@ def train(pre_epochs):
                 if pre_model.debug_mode and step % 100 == 0:  # 每100步记录一次
                     pre_model.logger.debug(f"\nBatch {step}/{len(pre_train_dataloader)}:")
                     pre_model.logger.debug(f"- Memory used: {torch.cuda.memory_allocated() / 1024 ** 2:.2f}MB")
-
-            for step, batch in loop:
-                batch_start_time = time.time()  # 记录每个batch的开始时间
-
-                # 将数据移动到GPU
-                input_ids = batch['input_ids'].to(device)
-                attention_mask = batch['attention_mask'].to(device)
-                labels = batch['labels'].to(device)
-                text = batch['text']
-                look_labels = labels.cpu().numpy()
-
-                # 清零梯度
-                pre_optimizer.zero_grad()
-
-                # 使用 autocast 进行混合精度训练
-                with autocast():
-                    loss = pre_model(input_ids, attention_mask, labels)
-
-                # 使用 scaler 来处理反向传播
-                scaler.scale(loss).backward()
-                scaler.step(pre_optimizer)
-                scaler.update()
-
-                total_loss += loss.item()
-
-                # 计算batch处理时间并更新进度条
-                batch_time = time.time() - batch_start_time
-                loop.set_description(f'Epoch [{epoch + 1}/{pre_epochs}]')
-                loop.set_postfix(loss=loss.item(), batch_time=f'{batch_time:.3f}s')
-
-            # 计算和显示每个epoch的统计信息
-            epoch_time = time.time() - epoch_start_time
-            avg_loss = total_loss / len(pre_train_dataloader)
-            print(f'Epoch {epoch + start_epoch + 1}/{pre_epochs + start_epoch}, '
-                  f'Average Loss: {avg_loss:.4f}, '
-                  f'Time: {epoch_time:.2f}s')
 
             # 保存模型
             save_path = './bert/bert_base_cased_{}/pretrain_{}/epoch_{}'.format(dataset, mi, epoch + start_epoch)
@@ -737,46 +717,53 @@ def vis():
 
 # 数据预处理验证模块（新增部分）
 def validate_data_pipeline():
-    print("\n=== 开始数据预处理验证 ===")
-    test_data = md.get_data('test')
+    try:
+        print("\n=== 开始数据预处理验证 ===")
+        test_data = md.get_data('test')
 
     # 检查 test_data 的结构
-    if isinstance(test_data, list):
-        print(f"test_data 类型为列表，转换为字典格式")
+        if isinstance(test_data, list):
+            print(f"test_data 类型为列表，转换为字典格式")
         test_data = {
             'data': [item['data'] for item in test_data],
             'label': [item['label'] for item in test_data],
             'paths': [item['paths'] for item in test_data]
-        }
+                    }
 
-    print(f"测试样本数量: {len(test_data['data'])}")
+        print(f"测试样本数量: {len(test_data['data'])}")
 
-    val_model = PreBert()
-    val_model.to(device)
-    val_model.init_tokenizer(entity_id)
+        val_model = PreBert()
+        val_model.to(device)
+        val_model.init_tokenizer(entity_id)
 
-    test_dataset = val_model.make_dataloader(test_data)
-    for batch in test_dataset:
-        sample = batch
-        break
+        test_dataset = val_model.make_dataloader(test_data)
+        for batch in test_dataset:
+            sample = batch
+            break
 
-    print(f"input_ids shape: {sample['input_ids'].shape}")
+        print(f"input_ids shape: {sample['input_ids'].shape}")
 
-    print("\n样本数据结构验证:")
-    print(f"input_ids shape: {sample['input_ids'].shape} | 示例: {sample['input_ids'][0][:10]}")
-    print(f"attention_mask shape: {sample['attention_mask'].shape}")
-    print(f"tail_pos: {sample['tail_pos'][0]} | tail_index: {sample['tail_index'][0]}")
-    print(f"文本示例: {sample['text'][0][:50]}...")
+        print("\n样本数据结构验证:")
+        print(f"input_ids shape: {sample['input_ids'].shape} | 示例: {sample['input_ids'][0][:10]}")
+        print(f"attention_mask shape: {sample['attention_mask'].shape}")
+        print(f"tail_pos: {sample['tail_pos'][0]} | tail_index: {sample['tail_index'][0]}")
+        print(f"文本示例: {sample['text'][0][:50]}...")
 
-    print("\nForward过程验证:")
-    dummy_input = sample['input_ids'][0].unsqueeze(0).to(device)
-    dummy_mask = sample['attention_mask'][0].unsqueeze(0).to(device)
-    dummy_labels = sample['labels'][0].unsqueeze(0).to(device)
-    loss = val_model(dummy_input, dummy_mask, dummy_labels)
-    print(f"Loss计算正常: {loss.item():.4f}")
+        print("\nForward过程验证:")
+        dummy_input = sample['input_ids'][0].unsqueeze(0).to(device)
+        dummy_mask = sample['attention_mask'][0].unsqueeze(0).to(device)
+        dummy_labels = sample['labels'][0].unsqueeze(0).to(device)
+        loss = val_model(dummy_input, dummy_mask, dummy_labels)
+        print(f"Loss计算正常: {loss.item():.4f}")
+
+    except Exception as e:
+        print(f"数据预处理验证失败: {str(e)}")
+        raise
 
 
 def main():
+    if args.debug:
+        pre_model.debug_mode = True
     validate_data_pipeline()
     if mode == 'train':
         train(args.max_epochs)

@@ -24,4 +24,10 @@ args.add_argument('--seed', type=int, default=0)
 args.add_argument('--second', type=bool, default=False)
 args.add_argument('--fuzzy_threshold', type=float, default=0.3, help='模糊隶属度阈值')
 args.add_argument('--type_embed_size', type=int, default=100, help='类型嵌入维度')
+args.add_argument('--debug', action='store_true', help='启用调试模式')
+args.add_argument('--debug_level',
+                 choices=['DEBUG', 'INFO', 'WARNING'],
+                 default='INFO',
+                 help='调试日志级别')
+
 args = args.parse_args()
