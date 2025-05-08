@@ -1,6 +1,7 @@
 import argparse
 
 args = argparse.ArgumentParser()
+args.add_argument('--vocab_size', type=int, default=None, help='词汇表大小，默认使用预训练模型的值')
 args.add_argument('--dataset', type=str, default='ICEWS14')
 args.add_argument('--batch_size', type=int, default=1000)
 args.add_argument('--emb_size', type=int, default=500)
