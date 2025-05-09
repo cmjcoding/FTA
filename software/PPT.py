@@ -1,4 +1,5 @@
 # PPT model
+# 1. 首先是所有的导入语句
 import os
 import random
 import time
@@ -12,7 +13,7 @@ import torch.nn.functional as F
 import transformers
 from torch.utils.data import Dataset
 from tqdm import tqdm, trange
-from transformers import BertTokenizerFast, BertModel, BertForMaskedLM,BertConfig
+from transformers import BertTokenizerFast, BertModel, BertForMaskedLM, BertConfig
 from dataset import Dataset as DatasetFromMe
 from utils import *
 from joblib import Parallel, delayed
@@ -20,29 +21,133 @@ from torch.cuda.amp import autocast, GradScaler
 from concurrent.futures import ThreadPoolExecutor
 import logging
 import argparse
+from make_data import MakeData
+import torch
+import numpy as np
 
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+# 2. 设置环境变量和警告
 
-warnings.filterwarnings('ignore')
-rand_flag = False
-if rand_flag:
-    print('ramdom len')
-else:
-    print('fixed len')
-dataset = args.dataset
-max_sample = args.max_sample
-seq_len = args.seq_len
-ep = args.epoch
-mi = args.mi
-start_epoch = args.start_epoch
-bert_path = './bert/bert_base_cased_{}'.format(dataset)
-if start_epoch > 0:
-    bert_path = './bert/bert_base_cased_{}/pretrain_{}/epoch_{}'.format(dataset, mi, start_epoch - 1)
-    print('continue training from epoch {}'.format(start_epoch))
-bert_path_test = './bert/bert_base_cased_{}/pretrain_{}/epoch_{}'.format(dataset, mi, ep)
-mode = args.m
-batch_size = args.batch_size
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    # 添加默认值给关键的数值参数，并确保类型正确
+    parser.add_argument('--vocab_size', type=int, default=0, help='词汇表大小')
+    parser.add_argument('--dataset', type=str, default='ICEWS14', help='数据集名称')
+    parser.add_argument('--batch_size', type=int, default=32, help='批次大小')
+    parser.add_argument('--emb_size', type=int, default=768, help='嵌入维度')
+    parser.add_argument('--max_epochs', type=int, default=1, help='最大训练轮数')
+    parser.add_argument('--init', type=str, default='', help='初始化方法')
+    parser.add_argument('--lr', type=float, default=1e-5, help='学习率')
+    parser.add_argument('--gpu', type=int, default=-1, help='GPU设备 ID (默认: -1, 使用 CPU)')
+    parser.add_argument('--max_sample', type=int, default=50, help='最大采样数')
+    parser.add_argument('--seq_len', type=int, default=128, help='序列长度')
+    parser.add_argument('--m', type=str, default='train', help='模式')
+    parser.add_argument('--epoch', type=int, default=0, help='训练轮数')
+    parser.add_argument('--mi', type=int, default=0, help='mi参数')
+    parser.add_argument('--entity_epoch', type=int, default=0, help='实体训练轮数')
+    parser.add_argument('--rel_epoch', type=int, default=0, help='关系训练轮数')
+    parser.add_argument('--start_epoch', type=int, default=0, help='开始轮数')
+    parser.add_argument('--test_sample', type=int, default=50, help='测试样本数')
+    parser.add_argument('--rand_flag', type=int, default=0, help='随机标志')
+    parser.add_argument('--pre_epochs', type=int, default=1, help='预训练轮数')
+    parser.add_argument('--finetune_epochs', type=int, default=1, help='微调轮数')
+    parser.add_argument('--seed', type=int, default=42, help='随机种子')
+    parser.add_argument('--second', type=int, default=0, help='second参数')
+    parser.add_argument('--fuzzy_threshold', type=float, default=0.0, help='模糊阈值')
+    parser.add_argument('--type_embed_size', type=int, default=768, help='类型嵌入维度')
+    parser.add_argument('--debug', action='store_true', help='是否开启调试模式')
+    parser.add_argument('--debug_level', choices=['DEBUG', 'INFO', 'WARNING'], default='DEBUG', help='调试日志级别')
+    parser.add_argument('--ablation', choices=['none', 'no_fuzzy', 'no_context'], default='none',
+                        help='控制消融实验：none表示使用模糊嵌入，no_fuzzy禁用模糊融合，no_context只用原始嵌入')
+
+    args = parser.parse_args()
+
+    # 设置环境变量和警告
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    warnings.filterwarnings('ignore')
+
+    # 设置设备
+    use_cuda = args.gpu >= 0 and torch.cuda.is_available()
+    if use_cuda:
+        device = torch.device('cuda')
+        torch.cuda.set_device(args.gpu)
+        print('GPU{} used'.format(args.gpu))
+    else:
+        device = torch.device('cpu')
+        print('CPU used')
+
+    print('dataset: {} used'.format(args.dataset))
+
+    # 初始化数据集
+    D = DatasetFromMe(args.dataset)
+    id_entity, entity_id = D.get_entity_by_id()
+    args.entity_num = len(entity_id)
+
+    # 确保所有可能用于比较的数值参数都是正确的类型
+    numeric_args = [
+        'vocab_size', 'batch_size', 'emb_size', 'max_epochs', 'max_sample',
+        'seq_len', 'epoch', 'mi', 'entity_epoch', 'rel_epoch', 'start_epoch',
+        'test_sample', 'rand_flag', 'pre_epochs', 'finetune_epochs', 'seed',
+        'second', 'type_embed_size'
+    ]
+
+    for arg_name in numeric_args:
+        if hasattr(args, arg_name):
+            try:
+                setattr(args, arg_name, int(getattr(args, arg_name)))
+            except (ValueError, TypeError):
+                setattr(args, arg_name, 0)
+
+    # 确保浮点数参数类型正确
+    float_args = ['lr', 'fuzzy_threshold']
+    for arg_name in float_args:
+        if hasattr(args, arg_name):
+            try:
+                setattr(args, arg_name, float(getattr(args, arg_name)))
+            except (ValueError, TypeError):
+                setattr(args, arg_name, 0.0)
+
+    # 添加其他必要参数
+    args.output_dir = './checkpoints'
+    args.save_steps = 100
+    args.device = device
+
+    return args
+
+
+def safe_int(value, default=0):
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+    # 解析参数
+
+
+args = parse_args()
+
+# 设置超参数
+superPrarams = {
+    'ICEWS14': [28996, 7128, 36123],
+    'ICEWS05': [28996, 10488, 39483],
+    'ICEWS18': [28996, 23033, 52028]
+}
+
+token_begin = superPrarams[args.dataset][0]
+token_sum = superPrarams[args.dataset][1]
+token_end = superPrarams[args.dataset][2]
+
+# 设置模型路径
+bert_path = f'./bert/bert_base_cased_{args.dataset}'
+if args.start_epoch > 0:
+    bert_path = f'./bert/bert_base_cased_{args.dataset}/pretrain_{args.mi}/epoch_{args.start_epoch - 1}'
+    print(f'continue training from epoch {args.start_epoch}')
+
+bert_path_test = f'./bert/bert_base_cased_{args.dataset}/pretrain_{args.mi}/epoch_{args.epoch}'
+
+# 6. 其他配置
 TOKENIZERS_PARALLELISM = (True | False)
+
 superPrarams = {
     'ICEWS14': [28996, 7128, 36123],
     'ICEWS05': [28996, 10488, 39483],
@@ -52,31 +157,20 @@ superPrarams = {
 token_begin = superPrarams[dataset][0]
 token_sum = superPrarams[dataset][1]
 token_end = superPrarams[dataset][2]
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='ICEWS14', help='数据集名称')
-parser.add_argument('--batch_size', type=int, default=32, help='批次大小')
-parser.add_argument('--max_epochs', type=int, default=1, help='最大训练轮数')
-parser.add_argument('--lr', type=float, default=1e-5, help='学习率')
-parser.add_argument('--debug', action='store_true', help='是否开启调试模式')
-parser.add_argument('--debug_level', type=str, default='DEBUG', help='调试日志级别')
-parser.add_argument('--output_dir',
-                   type=str,
-                   default='./checkpoints',
-                   help='模型输出和检查点保存目录')
-parser.add_argument('--save_steps',
-                   type=int,
-                   default=100,
-                   help='每多少步保存一次检查点')
-
-# 解析参数
-args = parser.parse_args()
-
-def sample_wrapper(quadruple, mode, dataTrain, dataValid, sample_num, rand_flag, dataset, numRel, id_rel, time_node, time_desp):
+def sample_wrapper(quadruple, mode, dataTrain, dataValid, sample_num, rand_flag, dataset, numRel, id_rel, time_node, time_desp, strategy='head'):
     idxSub = quadruple[0].item()
     quadruple = quadruple.tolist()
 
-    filterQuad = dataTrain[dataTrain[:, 0] == idxSub]
+    if strategy == 'head':
+        filterQuad = dataTrain[dataTrain[:, 0] == quadruple[0]]
+    elif strategy == 'rel':
+        filterQuad = dataTrain[dataTrain[:, 1] == quadruple[1]]
+    elif strategy == 'tail':
+        filterQuad = dataTrain[dataTrain[:, 2] == quadruple[2]]
+    else:
+        filterQuad = dataTrain[dataTrain[:, 0] == quadruple[0]]  # 默认
+
+
     if mode == 'test':
         filterQuad_valid = dataValid[dataValid[:, 0] == idxSub]
         filterQuad = torch.cat((filterQuad, filterQuad_valid), dim=0)
@@ -233,8 +327,10 @@ class MakeData:
                     self.numRel,
                     self.id_rel,
                     self.time_node,
-                    self.time_desp
+                    self.time_desp,
+                    strategy='head'  # 可切换为'rel' 或 'tail'
                 )
+
                 results.append(r)
             except Exception as e:
                 print(f"[ERROR] 第 {i} 个样本采样失败：{e}")
@@ -558,6 +654,38 @@ class PreBert(nn.Module):
                 labels: 标签（可选，用于训练）
             """
 
+        if args.ablation != 'no_fuzzy':
+            try:
+                # 创建 masked_input 用于上下文建模（CLS聚合）
+                masked_input = {
+                    "input_ids": input_ids.clone(),
+                    "attention_mask": attention_mask.clone()
+                }
+                masked_input['input_ids'][:, 1] = 103  # 通常把第一个实体替换为[MASK]
+                masked_input = {k: v.to(self.model.device) for k, v in masked_input.items()}
+
+                # 获取上下文嵌入
+                context_emb = self.fuzzy_layer.get_context_rep(masked_input)  # (batch, hidden)
+                origin_emb = self.model.bert.embeddings.word_embeddings(input_ids[:, 1])  # 实体原始嵌入 (batch, hidden)
+
+                # 计算 μ 并融合
+                mu = self.fuzzy_layer.compute_membership(origin_emb, context_emb).unsqueeze(-1)  # (batch, 1)
+                if args.ablation == 'no_context':
+                    fused_emb = origin_emb
+                else:
+                    fused_emb = mu * context_emb + (1 - mu) * origin_emb  # (batch, hidden)
+
+                # 替换第一个[MASK]实体的嵌入
+                input_embeds = self.model.bert.embeddings(input_ids)
+                input_embeds[:, 1, :] = fused_emb  # 用融合后的嵌入替换原嵌入
+            except Exception as e:
+                if self.debug_mode:
+                    self.logger.error(f"模糊类型嵌入融合失败: {str(e)}")
+                input_embeds = None
+        else:
+            input_embeds = None
+
+
         if self.debug_mode:
             self.logger.debug("Forward pass started")
             self.logger.debug(f"Input shapes:")
@@ -576,7 +704,8 @@ class PreBert(nn.Module):
 
                 # 模型前向传播
                 outputs = self.model(
-                    input_ids,
+                    inputs_embeds=input_embeds if input_embeds is not None else None,
+                    input_ids=None if input_embeds is not None else input_ids,
                     attention_mask=attention_mask,
                     labels=labels
                 )
@@ -1003,6 +1132,8 @@ def main():
     except Exception as e:
         print(f"运行出错: {str(e)}")
         raise
+    print(f"运行模式：{args.m} | 消融设定：{args.ablation}")
+
 
 if __name__ == '__main__':
     main()
