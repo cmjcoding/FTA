@@ -21,48 +21,49 @@ from torch.cuda.amp import autocast, GradScaler
 from concurrent.futures import ThreadPoolExecutor
 import logging
 import argparse
-from make_data import MakeData
 import torch
-import numpy as np
+import os
+import warnings
 
 # 2. 设置环境变量和警告
 
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    # 添加默认值给关键的数值参数，并确保类型正确
-    parser.add_argument('--vocab_size', type=int, default=0, help='词汇表大小')
-    parser.add_argument('--dataset', type=str, default='ICEWS14', help='数据集名称')
-    parser.add_argument('--batch_size', type=int, default=32, help='批次大小')
-    parser.add_argument('--emb_size', type=int, default=768, help='嵌入维度')
-    parser.add_argument('--max_epochs', type=int, default=1, help='最大训练轮数')
-    parser.add_argument('--init', type=str, default='', help='初始化方法')
-    parser.add_argument('--lr', type=float, default=1e-5, help='学习率')
-    parser.add_argument('--gpu', type=int, default=-1, help='GPU设备 ID (默认: -1, 使用 CPU)')
-    parser.add_argument('--max_sample', type=int, default=50, help='最大采样数')
-    parser.add_argument('--seq_len', type=int, default=128, help='序列长度')
-    parser.add_argument('--m', type=str, default='train', help='模式')
-    parser.add_argument('--epoch', type=int, default=0, help='训练轮数')
-    parser.add_argument('--mi', type=int, default=0, help='mi参数')
-    parser.add_argument('--entity_epoch', type=int, default=0, help='实体训练轮数')
-    parser.add_argument('--rel_epoch', type=int, default=0, help='关系训练轮数')
-    parser.add_argument('--start_epoch', type=int, default=0, help='开始轮数')
-    parser.add_argument('--test_sample', type=int, default=50, help='测试样本数')
-    parser.add_argument('--rand_flag', type=int, default=0, help='随机标志')
-    parser.add_argument('--pre_epochs', type=int, default=1, help='预训练轮数')
-    parser.add_argument('--finetune_epochs', type=int, default=1, help='微调轮数')
-    parser.add_argument('--seed', type=int, default=42, help='随机种子')
-    parser.add_argument('--second', type=int, default=0, help='second参数')
-    parser.add_argument('--fuzzy_threshold', type=float, default=0.0, help='模糊阈值')
-    parser.add_argument('--type_embed_size', type=int, default=768, help='类型嵌入维度')
-    parser.add_argument('--debug', action='store_true', help='是否开启调试模式')
-    parser.add_argument('--debug_level', choices=['DEBUG', 'INFO', 'WARNING'], default='DEBUG', help='调试日志级别')
-    parser.add_argument('--ablation', choices=['none', 'no_fuzzy', 'no_context'], default='none',
-                        help='控制消融实验：none表示使用模糊嵌入，no_fuzzy禁用模糊融合，no_context只用原始嵌入')
+    parser.add_argument('--vocab_size', type=int, default=28996)
+    parser.add_argument('--dataset', type=str, default='ICEWS14')
+    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--emb_size', type=int, default=128)
+    parser.add_argument('--max_epochs', type=int, default=1)
+    parser.add_argument('--init', type=str, default='xavier')
+    parser.add_argument('--lr', type=float, default=1e-5)
+    parser.add_argument('--gpu', type=int, default=-1)
+    parser.add_argument('--max_sample', type=int, default=100000)
+    parser.add_argument('--seq_len', type=int, default=128)
+    parser.add_argument('--m', type=str, default='train')
+    parser.add_argument('--epoch', type=int, default=0)
+    parser.add_argument('--mi', type=int, default=0)
+    parser.add_argument('--entity_epoch', type=int, default=2)
+    parser.add_argument('--rel_epoch', type=int, default=2)
+    parser.add_argument('--start_epoch', type=int, default=0)
+    parser.add_argument('--test_sample', type=int, default=50)
+    parser.add_argument('--rand_flag', type=bool, default=False)
+    parser.add_argument('--pre_epochs', type=int, default=1)
+    parser.add_argument('--finetune_epochs', type=int, default=1)
+    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--second', type=bool, default=False)
+    parser.add_argument('--fuzzy_threshold', type=float, default=0.5)
+    parser.add_argument('--type_embed_size', type=int, default=128)
+    parser.add_argument('--ablation', type=str, default='none',
+                        choices=['none', 'no_fuzzy', 'no_context'],
+                        help='Ablation mode')  # ✅ 关键参数
+    parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--debug_level', type=str, choices=['DEBUG', 'INFO', 'WARNING'], default='DEBUG')
 
     args = parser.parse_args()
 
     # 设置环境变量和警告
+    import os, warnings, torch
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     warnings.filterwarnings('ignore')
 
@@ -79,35 +80,32 @@ def parse_args():
     print('dataset: {} used'.format(args.dataset))
 
     # 初始化数据集
+    from utils.dataset import DatasetFromMe
     D = DatasetFromMe(args.dataset)
     id_entity, entity_id = D.get_entity_by_id()
     args.entity_num = len(entity_id)
 
-    # 确保所有可能用于比较的数值参数都是正确的类型
+    # 类型转换
     numeric_args = [
         'vocab_size', 'batch_size', 'emb_size', 'max_epochs', 'max_sample',
         'seq_len', 'epoch', 'mi', 'entity_epoch', 'rel_epoch', 'start_epoch',
-        'test_sample', 'rand_flag', 'pre_epochs', 'finetune_epochs', 'seed',
-        'second', 'type_embed_size'
+        'test_sample', 'pre_epochs', 'finetune_epochs', 'seed',
+        'type_embed_size'
     ]
-
     for arg_name in numeric_args:
-        if hasattr(args, arg_name):
-            try:
-                setattr(args, arg_name, int(getattr(args, arg_name)))
-            except (ValueError, TypeError):
-                setattr(args, arg_name, 0)
+        try:
+            setattr(args, arg_name, int(getattr(args, arg_name)))
+        except (ValueError, TypeError):
+            setattr(args, arg_name, 0)
 
-    # 确保浮点数参数类型正确
     float_args = ['lr', 'fuzzy_threshold']
     for arg_name in float_args:
-        if hasattr(args, arg_name):
-            try:
-                setattr(args, arg_name, float(getattr(args, arg_name)))
-            except (ValueError, TypeError):
-                setattr(args, arg_name, 0.0)
+        try:
+            setattr(args, arg_name, float(getattr(args, arg_name)))
+        except (ValueError, TypeError):
+            setattr(args, arg_name, 0.0)
 
-    # 添加其他必要参数
+    # 附加参数
     args.output_dir = './checkpoints'
     args.save_steps = 100
     args.device = device
@@ -121,26 +119,16 @@ def safe_int(value, default=0):
     except (ValueError, TypeError):
         return default
 
-    # 解析参数
-
-
-args = parse_args()
-
-# 设置超参数
-superPrarams = {
-    'ICEWS14': [28996, 7128, 36123],
-    'ICEWS05': [28996, 10488, 39483],
-    'ICEWS18': [28996, 23033, 52028]
-}
-
-token_begin = superPrarams[args.dataset][0]
-token_sum = superPrarams[args.dataset][1]
-token_end = superPrarams[args.dataset][2]
+mode = args.m  # 模式来源于命令行参数
+max_sample = args.max_sample
+rand_flag = args.rand_flag
 
 # 设置模型路径
 bert_path = f'./bert/bert_base_cased_{args.dataset}'
 if args.start_epoch > 0:
-    bert_path = f'./bert/bert_base_cased_{args.dataset}/pretrain_{args.mi}/epoch_{args.start_epoch - 1}'
+    bert_path = os.path.join('./bert', f'bert_base_cased_{args.dataset}', f'pretrain_{args.mi}', f'epoch_{args.start_epoch - 1}')
+else:
+    bert_path = os.path.join('./bert', f'bert_base_cased_{args.dataset}')
     print(f'continue training from epoch {args.start_epoch}')
 
 bert_path_test = f'./bert/bert_base_cased_{args.dataset}/pretrain_{args.mi}/epoch_{args.epoch}'
@@ -154,9 +142,10 @@ superPrarams = {
     'ICEWS18': [28996, 23033, 52028]
 }
 
-token_begin = superPrarams[dataset][0]
-token_sum = superPrarams[dataset][1]
-token_end = superPrarams[dataset][2]
+token_begin = superPrarams[args.dataset][0]
+token_sum = superPrarams[args.dataset][1]
+token_end = superPrarams[args.dataset][2]
+
 def sample_wrapper(quadruple, mode, dataTrain, dataValid, sample_num, rand_flag, dataset, numRel, id_rel, time_node, time_desp, strategy='head'):
     idxSub = quadruple[0].item()
     quadruple = quadruple.tolist()
@@ -241,7 +230,7 @@ class MakeData:
         self.dataTest = torch.cat((self.dataTest, self.dataTest_), dim=0)
 
     def get_time_dict(self):
-        with open('./data/{}/time_dict.txt'.format(self.dataset), 'r') as f:
+        with open(f'./data/{args.dataset}/time_dict.txt', 'r') as f:
             rows = f.readlines()
             time_node = []
             time_desp = []
@@ -490,25 +479,35 @@ class PreBertDataset(Dataset):
 
 
 class PreBert(nn.Module):
-    def __init__(self):
+    def __init__(self, args, bert_path, bert_path_test, token_begin, token_sum, token_end):
         super(PreBert, self).__init__()
-
-        # 1. 设置调试模式和日志
+        self.args = args
         self.debug_mode = args.debug
+        self.bert_path = bert_path
+        self.bert_path_test = bert_path_test
+        self.token_begin = token_begin
+        self.token_sum = token_sum
+        self.token_end = token_end
         self.logger = self._setup_logger()
 
         try:
             # 2. 初始化tokenizer
             self.tokenizer = BertTokenizerFast.from_pretrained(
-                f'./bert/bert_base_cased_{dataset}'
+                f'./bert/bert_base_cased_{args.dataset}'
             )
 
             # 3. 获取模型配置并设置正确的词汇表大小
             config = BertConfig.from_pretrained(bert_path)
-            # 确保词汇表大小正确（使用实际观察到的最大值）
             max_token_id = max(token_end, 31166)  # 31165 + 1 为安全起见
             self.vocab_size = max_token_id
             config.vocab_size = self.vocab_size
+
+            self.backbone_model = BertModel.from_pretrained(bert_path, config=config, ignore_mismatched_sizes=True)
+            self.mlm_model = BertForMaskedLM.from_pretrained(bert_path, config=config, ignore_mismatched_sizes=True)
+
+            # 调整词汇表大小
+            self.backbone_model.resize_token_embeddings(self.vocab_size)
+            self.mlm_model.resize_token_embeddings(self.vocab_size)
 
             if self.debug_mode:
                 self.logger.debug(f"Vocabulary size adjustment:")
@@ -520,9 +519,6 @@ class PreBert(nn.Module):
                 'config': config,
                 'ignore_mismatched_sizes': True
             }
-
-            self.backbone_model = BertModel.from_pretrained(bert_path, **model_init_kwargs)
-            self.mlm_model = BertForMaskedLM.from_pretrained(bert_path, **model_init_kwargs)
 
             if mode == 'train':
                 self.model = BertForMaskedLM.from_pretrained(bert_path, **model_init_kwargs)
@@ -541,26 +537,12 @@ class PreBert(nn.Module):
                 self.logger.debug("Model initialization completed successfully")
                 self.logger.debug(f"Model configuration: {self.config}")
 
-        except Exception as e:
-            if self.debug_mode:
-                self.logger.error(f"Model initialization failed: {str(e)}")
-            raise
 
-    def _setup_logger(self):
-        """设置日志记录器"""
-        logger = logging.getLogger(__name__)
-        if not logger.handlers:
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-            )
-            handler.setFormatter(formatter)
-            logger.addHandler(handler)
-            if self.debug_mode:
-                logger.setLevel(logging.DEBUG)
-            else:
-                logger.setLevel(logging.INFO)
-        return logger
+        except Exception as e:
+
+            print(f"模型初始化失败: {str(e)}")
+
+            raise
 
     def _log_batch_stats(self, loss_value, batch_idx, optimizer):
         """记录批次训练统计信息"""
@@ -634,9 +616,14 @@ class PreBert(nn.Module):
             entity_embedding = torch.mean(tokenized_entity, dim=0)
             self.model.bert.embeddings.word_embeddings.weight.data[-7128 + entity_id[entity]] = entity_embedding
 
-    def make_dataloader(self, bert_data):
+    def make_dataloader(self, bert_data, seq_len=128, batch_size=16):
         template_bert_dataset = PreBertDataset(self.tokenizer, seq_len, bert_data)
-        template_bert_dataloader = DataLoader(template_bert_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+        template_bert_dataloader = DataLoader(
+            template_bert_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=0
+        )
         return template_bert_dataloader
 
     def make_test_data(self, bert_data_batchs):
@@ -646,13 +633,9 @@ class PreBert(nn.Module):
 
 # +++ 替换forward函数 +++
     def forward(self, input_ids, attention_mask, labels=None):
-        """
-            前向传播方法
-            Args:
-                input_ids: 输入token的ID
-                attention_mask: 注意力掩码
-                labels: 标签（可选，用于训练）
-            """
+
+        if labels is not None and (labels == -100).all():
+            raise ValueError("输入的 labels 全部为 -100，模型无法计算 loss，请检查是否包含有效 [MASK] 标签预测目标。")
 
         if args.ablation != 'no_fuzzy':
             try:
@@ -681,7 +664,7 @@ class PreBert(nn.Module):
             except Exception as e:
                 if self.debug_mode:
                     self.logger.error(f"模糊类型嵌入融合失败: {str(e)}")
-                input_embeds = None
+                raise RuntimeError("模糊嵌入融合失败，请检查输入数据或模型配置")
         else:
             input_embeds = None
 
@@ -702,6 +685,9 @@ class PreBert(nn.Module):
                 if labels is not None:
                     labels = labels.to(self.model.device)
 
+                if self.debug_mode and labels is not None:
+                    input_embeds = None
+
                 # 模型前向传播
                 outputs = self.model(
                     inputs_embeds=input_embeds if input_embeds is not None else None,
@@ -710,23 +696,23 @@ class PreBert(nn.Module):
                     labels=labels
                 )
 
-                if self.debug_mode:
-                    self.logger.debug("Forward pass completed")
-                    if hasattr(outputs, 'loss'):
-                        self.logger.debug(f"Loss: {outputs.loss.item():.4f}")
-
-                # 如果是训练模式，返回loss
+                # 强制保证返回不是 None
                 if labels is not None:
-                    return outputs.loss
-                # 如果是推理模式，返回预测结果
-                return outputs.logits
+                    loss = getattr(outputs, "loss", None)
+                    if loss is None:
+                        raise ValueError("模型输出中 loss 为 None，请检查模型输入是否符合 MLM 要求。")
+                    return loss
+                else:
+                    return outputs.logits
+
+
 
             except Exception as e:
+
                 if self.debug_mode:
-                    self.logger.error(f"Forward pass error: {str(e)}")
-                    if 'outputs' in locals():
-                        self.logger.error(f"Outputs shape: {outputs.logits.shape}")
-                raise
+                    self.logger.error(f"模糊类型嵌入融合失败: {str(e)}")
+
+                raise RuntimeError("模糊嵌入处理失败，请检查输入数据或模型配置")
 
     def _validate_inputs(self, input_ids, attention_mask, labels):
         """验证输入数据的形状和值"""
@@ -781,23 +767,29 @@ else:
     device = torch.device('cpu')
     print('CPU used')
 print('dataset: {} used'.format(args.dataset))
-D = DatasetFromMe(dataset)
+D = DatasetFromMe(args.dataset)
 id_entity, entity_id = D.get_entity_by_id()
 entity_num = len(entity_id)
-md = MakeData(dataset, max_sample, rand_flag)
+md = MakeData(args.dataset, max_sample, rand_flag)
 
 
 # train
-def train(pre_epochs):
+def train(pre_epochs, args, md):
     print('start training')
-
+    pre_model = PreBert(
+        args=args,
+        bert_path=bert_path,
+        bert_path_test=bert_path_test,
+        token_begin=token_begin,
+        token_sum=token_sum,
+        token_end=token_end
+    )
     # 确保输出目录存在
     os.makedirs(args.output_dir, exist_ok=True)
 
     bert_pre_train = md.get_data('train')
 
     # 创建模型并设置debug模式
-    pre_model = PreBert()
     if args.debug:
         pre_model.debug_mode = True
         pre_model.logger.setLevel(getattr(logging, args.debug_level))
@@ -936,65 +928,85 @@ def train(pre_epochs):
     return pre_model, best_loss
 
 # eval and test
-def test():
-    print('start test/eval epoch{}'.format(ep))
-    print('now is {}'.format(args.mode))
+def test(args, md, bert_path, bert_path_test, token_begin, token_sum, token_end):
+    print("Start test/eval process")
+
+    # 加载测试数据
     bert_test_batchs = md.get_test_data(args.mode)
 
-    # 创建模型并设置debug模式
-    eval_model = PreBert()
+    # 创建模型并设置调试模式
+    eval_model = PreBert(
+        args=args,
+        bert_path=bert_path,
+        bert_path_test=bert_path_test,
+        token_begin=token_begin,
+        token_sum=token_sum,
+        token_end=token_end
+    )
     if args.debug:
         eval_model.debug_mode = True
         eval_model.logger.setLevel(getattr(logging, args.debug_level))
 
     eval_model.to(device)
-    error_count = 0
-    print('start test/eval epoch{}'.format(ep))
-    print('now is {}'.format(args.mode))
-    bert_test_batchs = md.get_test_data(args.mode)
+    eval_model.eval()
+
+    # 初始化评估指标
     hitsRank = [1, 3, 10]
     mrrCount = 0
-    hitsCount = [0 for i in range(len(hitsRank))]
-    eval_model = PreBert()
-    eval_model.to(device)
-    eval_model.init_tokenizer(entity_id)
+    hitsCount = [0 for _ in range(len(hitsRank))]
+
+    # 加载测试数据
     test_data = eval_model.make_test_data(bert_test_batchs)
-    eval_model.eval()
+
+    # 开始评估
     with torch.no_grad():
-        examplesLen = len(bert_test_batchs[0]['data'])
-        for idx in trange(examplesLen):
+        examplesLen = len(bert_test_batchs[0]["data"])
+        for idx in trange(examplesLen, desc="Evaluating"):
             scores = []
             for batch_num in range(args.test_sample):
+                # 获取单个测试样本
                 single_test = test_data.__getitem__(batch_num, idx)
-                tail_mask = single_test['tail_mask'].to(device)
-                attention_mask = single_test['attention_mask'].to(device)
-                tail_index = single_test['tail_index'].to(device)
-                labels = single_test['labels'].to(device)
-                text = single_test['text']
-                tail_pos = single_test['tail_pos']
+                tail_mask = single_test["tail_mask"].to(device)
+                attention_mask = single_test["attention_mask"].to(device)
+                tail_index = single_test["tail_index"].to(device)
+                labels = single_test["labels"].to(device)
+                text = single_test["text"]
+                tail_pos = single_test["tail_pos"]
+
+                # 添加维度
                 tail_mask = tail_mask.unsqueeze(0)
                 attention_mask = attention_mask.unsqueeze(0)
                 tail_index = tail_index.unsqueeze(0)
                 labels = labels.unsqueeze(0)
                 text = [text]
                 tail_pos = tail_pos.unsqueeze(0)
+
+                # 计算分数
                 score = eval_model.result(tail_mask, attention_mask, tail_index, text, tail_pos, labels)
                 scores.append(score)
+
+                # 调整 `tail_index` 的值
                 tail_index = token_sum - 1 - torch.abs(tail_index - token_end)
+
+            # 计算最终分数
             score = torch.mean(torch.stack(scores), dim=0)
             tail_index[tail_index < 0] = 0
+
+            # 更新评估指标
             mrrC, hitsC = calc_mrr_count(score, tail_index, hitsRank)
             mrrCount += mrrC
             for i in range(len(hitsRank)):
                 hitsCount[i] += hitsC[i]
-        print('count error: {}'.format(error_count))
+
+        # 打印评估结果
         mrr = mrrCount / examplesLen
-        print('mrr: {:.2f}'.format(mrr * 100))
-        results = ['{:.2f}'.format(mrr * 100)]
-        for i in range(len(hitsRank)):
-            print('hit@{}: {:.2f}'.format(hitsRank[i], hitsCount[i] / examplesLen * 100))
-            results.append('{:.2f}'.format(hitsCount[i] / examplesLen * 100))
-        print('\t'.join(results))
+        print(f"MRR: {mrr * 100:.2f}")
+        results = [f"{mrr * 100:.2f}"]
+        for i, rank in enumerate(hitsRank):
+            hit_rate = hitsCount[i] / examplesLen * 100
+            print(f"Hit@{rank}: {hit_rate:.2f}")
+            results.append(f"{hit_rate:.2f}")
+        print("\t".join(results))
 
 
 def vis():
@@ -1063,7 +1075,7 @@ def vis():
 # ...（前面原有的类定义代码保持不变）...
 
 # 数据预处理验证模块（新增部分）
-def validate_data_pipeline():
+def validate_data_pipeline(md, args):
     print("\n=== 开始数据预处理验证 ===")
     try:
         test_data = md.get_data('test')
@@ -1072,69 +1084,89 @@ def validate_data_pipeline():
         if isinstance(test_data, dict):
             print(f"测试样本数量: {len(test_data.get('data', []))}")
 
-            # 创建验证模型
-            val_model = PreBert()
+            val_model = PreBert(
+                args=args,
+                bert_path=bert_path,
+                bert_path_test=bert_path_test,
+                token_begin=token_begin,
+                token_sum=token_sum,
+                token_end=token_end
+            )
             val_model.to(device)
 
-            # 获取一个小批量数据
-            batch_size = min(args.batch_size, 4)  # 使用较小的批量进行验证
-            sample_data = {
-                'data': test_data['data'][:batch_size],
-                'label': test_data['label'][:batch_size] if isinstance(test_data['label'], torch.Tensor) else test_data[
-                    'label'],
-                'paths': test_data['paths'][:batch_size]
-            }
+            batch_size = min(args.batch_size, 4)
 
-            # 准备输入数据
+            # 构造 dummy 输入：强制插入 MASK 和标签位置
             dummy_input = torch.randint(0, val_model.vocab_size - 1, (batch_size, 128)).to(device)
-            dummy_mask = torch.ones((batch_size, 128)).to(device)
-            dummy_labels = torch.randint(0, val_model.vocab_size - 1, (batch_size, 128)).to(device)
+            dummy_input[:, 1] = 103  # [MASK] token
 
-            print("\n测试随机输入:")
-            loss = val_model(dummy_input, dummy_mask, dummy_labels)
-            print(f"随机输入测试成功，损失值: {loss.item():.4f}")
+            dummy_mask = torch.ones((batch_size, 128)).to(device)
+            dummy_labels = torch.full((batch_size, 128), -100).to(device)  # 默认忽略所有位置
+            dummy_labels[:, 1] = torch.randint(0, val_model.vocab_size - 1, (batch_size,)).to(device)
+
+            print(f"Dummy Input IDs shape: {dummy_input.shape}, Attention Mask shape: {dummy_mask.shape}, Labels shape: {dummy_labels.shape}")
+
+            try:
+                loss = val_model(dummy_input, dummy_mask, dummy_labels)
+                if loss is None:
+                    raise ValueError("Loss is None. Please check the model's forward method and input data.")
+                print(f"✅ 随机输入测试成功，损失值: {loss.item():.4f}")
+            except Exception as e:
+                print(f"❌ 随机输入测试失败: {str(e)}")
+                raise
 
             print("\n测试实际数据:")
-            test_dataset = val_model.make_dataloader(sample_data)
-            for batch in test_dataset:
-                loss = val_model(
-                    batch['input_ids'].to(device),
-                    batch['attention_mask'].to(device),
-                    batch['labels'].to(device)
-                )
-                print(f"实际数据测试成功，损失值: {loss.item():.4f}")
-                break
+            test_dataset = val_model.make_dataloader({
+                'data': test_data['data'][:batch_size],
+                'label': test_data['label'][:batch_size],
+                'paths': test_data['paths'][:batch_size]
+            }, seq_len=128, batch_size=4)
 
+            for batch in test_dataset:
+                try:
+                    loss = val_model(
+                        batch['input_ids'].to(device),
+                        batch['attention_mask'].to(device),
+                        batch['labels'].to(device)
+                    )
+                    if loss is None:
+                        raise ValueError("Loss is None. Please check the model's forward method and input data.")
+                    print(f"✅ 实际数据测试成功，损失值: {loss.item():.4f}")
+                    break
+                except Exception as e:
+                    print(f"❌ 实际数据测试失败: {str(e)}")
+                    raise
     except Exception as e:
         print(f"数据预处理验证失败: {str(e)}")
-        print("\n详细的数据结构:")
         if 'test_data' in locals():
-            print(f"test_data类型: {type(test_data)}")
+            print(f"test_data 类型: {type(test_data)}")
             if isinstance(test_data, dict):
-                print("字典键:", list(test_data.keys()))
+                print("字典键: ", list(test_data.keys()))
         raise
 
 
-def main():
+def main(args):
     try:
-        # 首先进行数据预处理验证
-        validate_data_pipeline()
-
+        print(f"[DEBUG] 当前 ablation 模式: {args.ablation}")
+        md = MakeData(args.dataset, args.max_sample, args.rand_flag)
+        validate_data_pipeline(md, args)
+        # 根据运行模式调用相应模块
+        mode = args.m
         if mode == 'train':
-            # 在train函数内部设置debug模式
-            train(args.max_epochs)
-        elif mode == 'test' or mode == 'eval':
-            # 在test函数内部设置debug模式
-            test()
+            train(args.max_epochs, args, md)
+        elif mode in ['test', 'eval']:
+            test(args, md, bert_path, bert_path_test, token_begin, token_sum, token_end)
         else:
-            # 在vis函数内部设置debug模式
-            vis()
+            vis(args, md, bert_path, bert_path_test, token_begin, token_sum, token_end)
     except Exception as e:
         print(f"运行出错: {str(e)}")
         raise
-    print(f"运行模式：{args.m} | 消融设定：{args.ablation}")
+
 
 
 if __name__ == '__main__':
-    main()
+    args = parse_args()
+    main(args)
+
+
 
